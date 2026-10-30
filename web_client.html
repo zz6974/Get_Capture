@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<!-- 图片接收测试页: 直接双击用浏览器打开即可
+     服务端帧格式: magic(2B, 小端 0xCCDD) + type(1B) + length(4B, 小端) + payload(JPEG) -->
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>图片接收测试</title>
+</head>
+<body>
+    <h3>WebSocket 图片接收测试</h3>
+    <div>状态: <span id="status">连接中...</span></div>
+    <div>帧统计: 收到 <span id="count">0</span> 帧, 大小 <span id="size">-</span> 字节, 解析失败 <span id="bad">0</span> 帧</div>
+    <img id="img" style="max-width: 640px; border: 1px solid #ccc;" alt="图片区域">
+    <script>
+        const ws = new WebSocket('ws://127.0.0.1:8081/ws');
+        ws.binaryType = 'arraybuffer';   // 必须: 二进制消息按 ArrayBuffer 接收
+
+        const img = document.getElementById('img');
+        const statusEl = document.getElementById('status');
+        const countEl = document.getElementById('count');
+        const sizeEl = document.getElementById('size');
+        const badEl = document.getElementById('bad');
+
+        let count = 0, bad = 0;
+        let url = null;
+
+        ws.onopen = () => { statusEl.textContent = '已连接'; };
+        ws.onclose = () => { statusEl.textContent = '已断开'; };
+        ws.onerror = () => { statusEl.textContent = '连接错误'; };
+
+        ws.onmessage = (ev) => {
+            if (typeof ev.data === 'string') {
+                console.log('文本消息:', ev.data);
+                return;
+            }
+            // 按服务端协议解析: magic(2B LE) + type(1B) + length(4B LE) + payload
+            const buf = new Uint8Array(ev.data);
+            if (buf.length < 7) { bad++; badEl.textContent = bad; return; }
+
+            const view = new DataView(ev.data);
+            const magic = view.getUint16(0, true);   // 小端
+            const type = view.getUint8(2);
+            const length = view.getUint32(3, true);  // 小端
+            if (magic !== 0xCCDD || type !== 1 || 7 + length !== buf.length) {
+                bad++;
+                badEl.textContent = bad;
+                console.warn('帧头不匹配', { magic, type, length, total: buf.length });
+                return;
+            }
+
+            // payload 即 JPEG 数据, 直接交给 <img>
+            const jpeg = new Blob([buf.subarray(7, 7 + length)], { type: 'image/jpeg' });
+            const newUrl = URL.createObjectURL(jpeg);
+            img.src = newUrl;
+            if (url) URL.revokeObjectURL(url);
+            url = newUrl;
+
+            count++;
+            countEl.textContent = count;
+            sizeEl.textContent = length;
+        };
+    </script>
+</body>
+</html>
